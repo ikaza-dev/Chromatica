@@ -5,11 +5,14 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.support.v4.media.session.MediaSessionCompat
 import androidx.core.app.NotificationCompat
 import com.example.MainActivity
 import com.example.R
 
 class PlaybackService : Service() {
+
+    private var mediaSession: MediaSessionCompat? = null
 
     companion object {
         const val CHANNEL_ID = "playback_channel_v1"
@@ -24,6 +27,9 @@ class PlaybackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        mediaSession = MediaSessionCompat(this, "ChromaticaMediaSession").apply {
+            isActive = true
+        }
         createNotificationChannel()
         showForegroundNotification()
     }
@@ -67,6 +73,11 @@ class PlaybackService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
+        val mediaStyle = androidx.media.app.NotificationCompat.MediaStyle()
+        mediaSession?.let {
+            mediaStyle.setMediaSession(it.sessionToken)
+        }
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(clickPendingIntent)
@@ -84,6 +95,8 @@ class PlaybackService : Service() {
             val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
             val playPauseTitle = if (isPlaying) "Pause" else "Play"
 
+            mediaStyle.setShowActionsInCompactView(0, 1, 2)
+
             builder.setContentTitle(track.title)
                 .setContentText(track.artist)
                 .setSubText(track.album)
@@ -91,12 +104,11 @@ class PlaybackService : Service() {
                 .addAction(playPauseIcon, playPauseTitle, playPausePendingIntent)
                 .addAction(android.R.drawable.ic_media_next, "Next", nextPendingIntent)
                 .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop", stopPendingIntent)
-                .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
-                    .setShowActionsInCompactView(0, 1, 2)
-                )
+                .setStyle(mediaStyle)
         } else {
             builder.setContentTitle("Chromatica")
                 .setContentText("Sleek music stream engine is ready")
+                .setStyle(mediaStyle)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -139,6 +151,10 @@ class PlaybackService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        mediaSession?.apply {
+            isActive = false
+            release()
+        }
         PlaybackManager.releasePlayer()
     }
 }

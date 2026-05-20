@@ -10,7 +10,7 @@ import com.example.data.Playlist
 import com.example.model.Track
 import com.example.model.TagExtractor
 import com.example.data.TagScore
-import com.example.network.InvidiousClient
+import com.example.network.SoundCloudClient
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -416,22 +416,36 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             _isSearchingOnline.value = true
             try {
                 val results = withContext(Dispatchers.IO) {
-                    InvidiousClient.searchTracks(query)
+                    SoundCloudClient.searchTracks(query)
                 }
-                val tracks = results.filter { it.videoId != null && it.title != null }.map { res ->
+                
+                val moshi = com.squareup.moshi.Moshi.Builder()
+                    .add(com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory())
+                    .build()
+                val mediaAdapter = moshi.adapter(com.example.network.SoundCloudMedia::class.java)
+
+                val tracks = results.filter { it.id != null && it.title != null }.map { res ->
                     val titleText = res.title!!
-                    val artistText = res.author ?: "Unknown Artist"
+                    val artistText = res.user?.username ?: "Unknown Artist"
                     val extractedTagsList = TagExtractor.extractTags(titleText, artistText)
                     val tagsString = extractedTagsList.joinToString(",")
+                    
+                    val serializedMedia = try {
+                        val mediaObj = res.media ?: com.example.network.SoundCloudMedia(emptyList())
+                        mediaAdapter.toJson(mediaObj)
+                    } catch (e: Exception) {
+                        "{}"
+                    }
+
                     Track(
-                        id = res.videoId!!,
+                        id = res.id.toString(),
                         title = titleText,
                         artist = artistText,
-                        album = "YouTube Single",
-                        duration = (res.lengthSeconds ?: 0L) * 1000,
-                        data = res.videoId!!, // Treat videoId as stream key resolver later
+                        album = "SoundCloud Track",
+                        duration = res.duration ?: 0L,
+                        data = serializedMedia, // Treat serialized media transcodings as stream key resolver later
                         isDemo = false,
-                        thumbnailUrl = "https://img.youtube.com/vi/${res.videoId}/hqdefault.jpg",
+                        thumbnailUrl = SoundCloudClient.getHighResArtworkUrl(res.artworkUrl) ?: "https://images.unsplash.com/photo-1614149162883-504ce4d13909?w=400&auto=format&fit=crop",
                         genreTags = tagsString
                     )
                 }
@@ -565,7 +579,7 @@ class MusicPlayerViewModel(application: Application) : AndroidViewModel(applicat
             _downloadingTrackIds.update { it + track.id }
             try {
                 val streamUrl = withContext(Dispatchers.IO) {
-                    InvidiousClient.getStreamUrl(track.id)
+                    SoundCloudClient.getStreamUrl(track.id, track.data)
                 }
                 repository.downloadTrack(track, streamUrl)
             } catch (e: Exception) {

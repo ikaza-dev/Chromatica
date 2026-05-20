@@ -49,8 +49,9 @@ private val LightColorScheme =
     outline = SleekLightOutline
   )
 
-private fun getDynamicSeedColor(title: String, artist: String): Color {
-    val h = kotlin.math.abs((title + artist).hashCode() % 360).toFloat()
+private fun getDynamicSeedColor(title: String, artist: String, thumbnailUrl: String?): Color {
+    val seedString = thumbnailUrl ?: (title + artist)
+    val h = kotlin.math.abs(seedString.hashCode() % 360).toFloat()
     return hsvToColor(h, 0.65f, 0.55f)
 }
 
@@ -122,7 +123,7 @@ fun MyApplicationTheme(
   val colorScheme =
     when {
       selectedTrack != null -> {
-          val seed = getDynamicSeedColor(selectedTrack.title, selectedTrack.artist)
+          val seed = getDynamicSeedColor(selectedTrack.title, selectedTrack.artist, selectedTrack.thumbnailUrl)
           makeColorSchemeForSeed(seed, darkTheme)
       }
       dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {

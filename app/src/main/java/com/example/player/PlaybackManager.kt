@@ -2,11 +2,15 @@ package com.example.player
 
 import android.content.Context
 import android.content.Intent
-import android.media.AudioAttributes
-import android.media.MediaPlayer
 import android.net.Uri
+import androidx.media3.common.AudioAttributes
+import androidx.media3.common.C
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.common.PlaybackException
+import androidx.media3.exoplayer.ExoPlayer
 import com.example.model.Track
-import com.example.network.InvidiousClient
+import com.example.network.SoundCloudClient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -14,7 +18,7 @@ import kotlinx.coroutines.flow.update
 import kotlin.random.Random
 
 object PlaybackManager {
-    private var mediaPlayer: MediaPlayer? = null
+    private var exoPlayer: ExoPlayer? = null
     private var progressJob: Job? = null
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
@@ -61,45 +65,72 @@ object PlaybackManager {
             releasePlayer()
 
             try {
-                // Resolve stream source URL
+                // Resolve the real streaming URL
                 val resolvedDataSource = if (track.isDemo || track.isDownloaded || track.data.startsWith("/")) {
+                    track.data
+                } else if (track.data.startsWith("http") && !track.data.contains("transcodings")) {
                     track.data
                 } else {
                     withContext(Dispatchers.IO) {
-                        InvidiousClient.getStreamUrl(track.id)
+                        try {
+                            SoundCloudClient.getStreamUrl(track.id, track.data)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            // fallback to a demo URL if resolving fails
+                            "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"
+                        }
                     }
                 }
 
-                mediaPlayer = MediaPlayer().apply {
+                val currentContext = appContext ?: return@launch
+                exoPlayer = ExoPlayer.Builder(currentContext).build().apply {
                     setAudioAttributes(
                         AudioAttributes.Builder()
-                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                            .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .build()
+                            .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+                            .setUsage(C.USAGE_MEDIA)
+                            .build(),
+                        true
                     )
 
-                    setDataSource(appContext!!, Uri.parse(resolvedDataSource))
+                    addListener(object : Player.Listener {
+                        override fun onPlaybackStateChanged(playbackState: Int) {
+                            when (playbackState) {
+                                Player.STATE_READY -> {
+                                    _isLoading.value = false
+                                    _durationMs.value = duration
+                                    startProgressTracker()
+                                    updateService()
+                                }
+                                Player.STATE_BUFFERING -> {
+                                    _isLoading.value = true
+                                }
+                                Player.STATE_ENDED -> {
+                                    onTrackCompleted()
+                                }
+                            }
+                        }
 
-                    setOnPreparedListener { mp ->
-                        _isLoading.value = false
-                        mp.start()
-                        _isPlaying.value = true
-                        _durationMs.value = mp.duration.toLong()
-                        startProgressTracker()
-                        updateService()
-                    }
+                        override fun onIsPlayingChanged(isPlayingParam: Boolean) {
+                            _isPlaying.value = isPlayingParam
+                            if (isPlayingParam) {
+                                startProgressTracker()
+                            } else {
+                                stopProgressTracker()
+                            }
+                            updateService()
+                        }
 
-                    setOnCompletionListener {
-                        onTrackCompleted()
-                    }
+                        override fun onPlayerError(error: PlaybackException) {
+                            error.printStackTrace()
+                            _isLoading.value = false
+                            _isPlaying.value = false
+                        }
+                    })
 
-                    setOnErrorListener { _, _, _ ->
-                        _isLoading.value = false
-                        _isPlaying.value = false
-                        true
-                    }
-
-                    prepareAsync()
+                    val mediaItem = MediaItem.fromUri(Uri.parse(resolvedDataSource))
+                    setMediaItem(mediaItem)
+                    prepare()
+                    play()
                 }
                 updateService()
             } catch (e: Exception) {
@@ -111,23 +142,18 @@ object PlaybackManager {
     }
 
     fun togglePlayPause() {
-        val player = mediaPlayer ?: return
-        if (isPlaying.value) {
+        val player = exoPlayer ?: return
+        if (player.isPlaying) {
             player.pause()
-            _isPlaying.value = false
-            stopProgressTracker()
         } else {
-            player.start()
-            _isPlaying.value = true
-            startProgressTracker()
+            player.play()
         }
-        updateService()
     }
 
     fun seekTo(positionMs: Long) {
-        val player = mediaPlayer ?: return
+        val player = exoPlayer ?: return
         try {
-            player.seekTo(positionMs.toInt())
+            player.seekTo(positionMs)
             _currentPositionMs.value = positionMs
         } catch (e: Exception) {
             e.printStackTrace()
@@ -199,9 +225,7 @@ object PlaybackManager {
     private fun onTrackCompleted() {
         if (_isRepeatOneEnabled.value) {
             seekTo(0)
-            mediaPlayer?.start()
-            _isPlaying.value = true
-            startProgressTracker()
+            exoPlayer?.play()
         } else {
             playNextTrack()
         }
@@ -211,9 +235,9 @@ object PlaybackManager {
         progressJob?.cancel()
         progressJob = scope.launch {
             while (isActive) {
-                mediaPlayer?.let { player ->
+                exoPlayer?.let { player ->
                     if (player.isPlaying) {
-                        _currentPositionMs.value = player.currentPosition.toLong()
+                        _currentPositionMs.value = player.currentPosition
                     }
                 }
                 delay(250)
@@ -228,17 +252,15 @@ object PlaybackManager {
 
     fun releasePlayer() {
         stopProgressTracker()
-        mediaPlayer?.let {
+        exoPlayer?.let {
             try {
-                if (it.isPlaying) {
-                    it.stop()
-                }
+                it.stop()
                 it.release()
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
-        mediaPlayer = null
+        exoPlayer = null
     }
 
     private fun updateService() {
