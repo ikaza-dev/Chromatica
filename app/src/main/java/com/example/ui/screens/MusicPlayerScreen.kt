@@ -35,6 +35,8 @@ import com.example.model.Track
 import com.example.player.MusicPlayerViewModel
 import com.example.ui.components.DynamicAlbumArt
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.items
@@ -120,7 +122,20 @@ fun MusicPlayerScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        Scaffold { innerPadding ->
+        // Underlying content wrapper with conditional alpha and click disabling when player is expanded
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer(alpha = if (isPlayerExpanded) 0f else 1f)
+                .then(
+                    if (isPlayerExpanded) {
+                        Modifier.pointerInput(Unit) {}
+                    } else {
+                        Modifier
+                    }
+                )
+        ) {
+            Scaffold { innerPadding ->
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -451,6 +466,7 @@ fun MusicPlayerScreen(
                 onTabSelected = { viewModel.setActiveTab(it) }
             )
         }
+        }
 
         // Full Screen Player Overlay View
         AnimatedVisibility(
@@ -463,25 +479,32 @@ fun MusicPlayerScreen(
                 targetOffsetY = { it },
                 animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMedium)
             ) + fadeOut(),
-            modifier = Modifier.fillMaxSize()
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(2f)
         ) {
-            selectedTrack?.let { track ->
-                FullScreenPlayerStage(
-                    track = track,
-                    isPlaying = isPlaying,
-                    isLoading = isLoading,
-                    currentPositionMs = currentPositionMs,
-                    durationMs = durationMs,
-                    isShuffleEnabled = isShuffleEnabled,
-                    isRepeatOneEnabled = isRepeatOneEnabled,
-                    onSeek = { viewModel.seekTo(it) },
-                    onTogglePlay = { viewModel.togglePlayPause() },
-                    onSkipNext = { viewModel.playNextTrack() },
-                    onSkipPrevious = { viewModel.playPreviousTrack() },
-                    onToggleShuffle = { viewModel.toggleShuffle() },
-                    onToggleRepeatOne = { viewModel.toggleRepeatOne() },
-                    onMinimize = { isPlayerExpanded = false }
-                )
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.surface
+            ) {
+                selectedTrack?.let { track ->
+                    FullScreenPlayerStage(
+                        track = track,
+                        isPlaying = isPlaying,
+                        isLoading = isLoading,
+                        currentPositionMs = currentPositionMs,
+                        durationMs = durationMs,
+                        isShuffleEnabled = isShuffleEnabled,
+                        isRepeatOneEnabled = isRepeatOneEnabled,
+                        onSeek = { viewModel.seekTo(it) },
+                        onTogglePlay = { viewModel.togglePlayPause() },
+                        onSkipNext = { viewModel.playNextTrack() },
+                        onSkipPrevious = { viewModel.playPreviousTrack() },
+                        onToggleShuffle = { viewModel.toggleShuffle() },
+                        onToggleRepeatOne = { viewModel.toggleRepeatOne() },
+                        onMinimize = { isPlayerExpanded = false }
+                    )
+                }
             }
         }
 
@@ -653,6 +676,7 @@ fun TrackLazyList(
                     DynamicAlbumArt(
                         title = track.title,
                         artist = track.artist,
+                        thumbnailUrl = track.thumbnailUrl,
                         modifier = Modifier
                             .size(48.dp)
                             .clip(RoundedCornerShape(12.dp))
@@ -1002,6 +1026,7 @@ fun FullScreenPlayerStage(
                 DynamicAlbumArt(
                     title = track.title,
                     artist = track.artist,
+                    thumbnailUrl = track.thumbnailUrl,
                     modifier = Modifier
                         .sizeIn(minWidth = 240.dp, minHeight = 240.dp, maxWidth = 300.dp, maxHeight = 300.dp)
                         .aspectRatio(1f)

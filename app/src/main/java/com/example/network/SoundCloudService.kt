@@ -50,6 +50,16 @@ data class SoundCloudSearchResponse(
     @Json(name = "collection") val collection: List<SoundCloudTrackResponse>? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class SoundCloudChartItem(
+    @Json(name = "track") val track: SoundCloudTrackResponse? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class SoundCloudChartsResponse(
+    @Json(name = "collection") val collection: List<SoundCloudChartItem>? = null
+)
+
 object SoundCloudClient {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
